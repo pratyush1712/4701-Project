@@ -1,0 +1,6 @@
+Test Accuracy: 0.7292576419213974
+Test F1: 0.5753424657534246
+Test Recall: 0.47191011235955055
+Confusion Matrix
+[[125  15]
+ [ 47  42]]

@@ -142,3 +142,4 @@ if __name__ == "__main__":
     plot_scores_data(condition_data)
     print("MADRS scores plotted.")
     plot_daily_activity_patterns(condition_data)
+    plot_daily_activity_patterns(control_data)
