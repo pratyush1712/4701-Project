@@ -28,7 +28,7 @@ from sklearn.model_selection import (
     cross_val_score,
     train_test_split,
 )
-from sklearn.svm import SVC
+from sklearn.svm import SVC, SVR
 from tqdm import tqdm
 from tslearn.datasets import CachedDatasets
 from tslearn.preprocessing import TimeSeriesScalerMinMax
@@ -50,8 +50,9 @@ def depression_classifier_data(control_data, condition_data):
                 if x["date"] == date:
                     activity = x["activity"]
                     activities.append(activity)
-            depression_classifier["X"].append(activities)
-            depression_classifier["y"].append(1)  # 1 for depression
+            if len(activities) == 1440:
+                depression_classifier["X"].append(activities)
+                depression_classifier["y"].append(1)  # 1 for depression
     for data in control_data.values():
         sleep_data = data["sleep-data"]
         # get by sleep vectors by individual dates
@@ -62,8 +63,9 @@ def depression_classifier_data(control_data, condition_data):
                 if x["date"] == date:
                     activity = x["activity"]
                     activities.append(activity)
-            depression_classifier["X"].append(activities)
-            depression_classifier["y"].append(0)  # 0 for non-depression
+            if len(activities) == 1440:
+                depression_classifier["X"].append(activities)
+                depression_classifier["y"].append(0)  # 0 for non-depression
     return depression_classifier
 
 
@@ -116,7 +118,14 @@ def svm_time_series_model(X, y):
         print("Building Time Series SVC Model")
         # Scale data
         X = TimeSeriesScalerMinMax().fit_transform(X)
-        model = TimeSeriesSVC(kernel="gak", gamma=0.1)
+        model = TimeSeriesSVC(
+            kernel="gak",
+            C=10.0,
+            gamma=0.1,
+            verbose=1,
+            probability=True,
+            random_state=42,
+        )
         model.fit(X, y)
         return model
     except Exception as e:
@@ -136,30 +145,37 @@ def tsfel_model(X, y):
         return None
 
 
-def RNN_model(X, y):
+def RNN_model(X_train, y_train, X_val, y_val):
     try:
         print("Building RNN Model")
         model = Sequential()
-        print(X.shape)
-        model.add(LSTM(256, input_shape=(1, X.shape[1]), return_sequences=True))
+        model.add(LSTM(256, input_shape=(1, X_train.shape[1]), return_sequences=True))
         model.add(LSTM(256, return_sequences=True))
         model.add(LSTM(256, return_sequences=True))
         model.add(LSTM(256, return_sequences=True))
         model.add(LSTM(128))
         model.add(Dense(1, activation="relu"))
+        model.summary()
         model.compile(
             optimizer=Adam(learning_rate=0.001),
             loss="binary_crossentropy",
             metrics=["accuracy"],
         )
         model.fit(
-            X,
-            y,
+            X_train.reshape(-1, 1, X_train.shape[1]),
+            y_train,
             epochs=50,
-            batch_size=64,
-            validation_split=0.2,
-            callbacks=[EarlyStopping(patience=5)],
+            batch_size=128,
+            validation_data=(X_val.reshape(-1, 1, X_val.shape[1]), y_val),
         )
+        # plot accuracy and loss epochs
+        plt.plot(model.history.history["accuracy"])
+        plt.plot(model.history.history["val_accuracy"])
+        plt.title("Model Accuracy")
+        plt.ylabel("Accuracy")
+        plt.xlabel("Epoch")
+        plt.legend(["Train", "Validation"], loc="upper left")
+        plt.show()
         return model
     except Exception as e:
         print(e)
@@ -188,15 +204,21 @@ def evaluate_model(model, X_test, y_test, model_name="Random Forest"):
 if __name__ == "__main__":
     # Load data
     depression_classifier_data_dict = load_data()
-    X = depression_classifier_data_dict["X"]
-    y = depression_classifier_data_dict["y"]
+    X = np.array(depression_classifier_data_dict["X"]).astype(np.float32)
+    y = np.array(depression_classifier_data_dict["y"]).astype(np.float32)
     # convert to dataframe
-    X = pd.DataFrame(X)
-    y = pd.Series(y)
+    X_df = pd.DataFrame(X)
+    y_df = pd.Series(y)
 
     # Split data
+    X_train_df, X_test_df, y_train, y_test = train_test_split(
+        X_df, y_df, test_size=0.2, random_state=42
+    )
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
+    )
+    X_train, X_val, y_train, y_val = train_test_split(
+        X, y, test_size=0.1, random_state=42
     )
     print("Data Split: Train Size: ", X_train.shape, " Test Size: ", X_test.shape)
 
@@ -209,9 +231,8 @@ if __name__ == "__main__":
     # )
     # models.append(build_xgboost_model(X_train, y_train))
     # evaluation_results.append(evaluate_model(models[-1], X_test, y_test, "XGBoost"))
-    models.append(tsfel_model(X_train, y_train))
-    evaluation_results.append(evaluate_model(models[-1], X_test, y_test, "TSFEL"))
-    models.append(RNN_model(X_train, y_train))
-    evaluation_results.append(evaluate_model(models[-1], X_test, y_test, "RNN"))
+    # models.append(tsfel_model(X_train, y_train))
+    # evaluation_results.append(evaluate_model(models[-1], X_test, y_test, "TSFEL"))
+    # models.append(RNN_model(X_train, y_train, X_val, y_val))
     models.append(svm_time_series_model(X_train, y_train))
     evaluation_results.append(evaluate_model(models[-1], X_test, y_test, "SVM"))
